@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pyrolisten"
+version = "0.1.0"
+description = "listen() and ask() for Pyrogram, Kurigram and other Pyrogram forks"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+    { name = "Maharam Ali Khan", email = "psupdates74@gmail.com" },
+]
+keywords = ["telegram", "pyrogram", "kurigram", "conversation", "listen", "ask"]
+# No hard dependency on purpose: most Pyrogram forks install the same `pyrogram`
+# module, so a required one would clash with the fork the user already has.
+# Users pick their library with an extra instead, e.g. pip install "pyrolisten[kurigram]".
+dependencies = []
+
+[project.optional-dependencies]
+pyrogram  = ["pyrogram"]
+kurigram  = ["kurigram"]
+wzgram    = ["wzgram"]
+
+[project.urls]
+Homepage = "https://github.com/ps-updates/pyrolisten"
+Issues = "https://github.com/ps-updates/pyrolisten/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pyrolisten"]
