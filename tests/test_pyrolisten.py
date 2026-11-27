@@ -39,21 +39,29 @@ def _install_fake_pyrogram():
         def __init__(self, callback):
             self.callback = callback
 
+    class CallbackQueryHandler:
+        def __init__(self, callback):
+            self.callback = callback
+
     pg = types.ModuleType("pyrogram")
     pg.Client = FakeClient
     pg.StopPropagation = StopPropagation
 
     handlers = types.ModuleType("pyrogram.handlers")
     handlers.MessageHandler = MessageHandler
+    handlers.CallbackQueryHandler = CallbackQueryHandler
 
     errors = types.ModuleType("pyrogram.errors")
+    enums = types.ModuleType("pyrogram.enums")
 
     pg.handlers = handlers
     pg.errors = errors
+    pg.enums = enums
 
     sys.modules["pyrogram"] = pg
     sys.modules["pyrogram.handlers"] = handlers
     sys.modules["pyrogram.errors"] = errors
+    sys.modules["pyrogram.enums"] = enums
     return pg
 
 
@@ -76,6 +84,14 @@ class PyrolistenTests(unittest.IsolatedAsyncioTestCase):
         _, handler = self.client.handlers[0]
         try:
             await handler.callback(self.client, message)
+        except self.pg.StopPropagation:
+            return True
+        return False
+
+    async def _dispatch_callback(self, query):
+        _, handler = self.client.handlers[1]
+        try:
+            await handler.callback(self.client, query)
         except self.pg.StopPropagation:
             return True
         return False
@@ -142,7 +158,7 @@ class PyrolistenTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0)
         await asyncio.sleep(0)
 
-        self.assertEqual(len(self.client.handlers), 1)
+        self.assertEqual(len(self.client.handlers), 2)
         await self._dispatch(_msg(1, 1, "one"))
         await self._dispatch(_msg(1, 2, "two"))
         self.assertEqual((await t1).text, "one")
@@ -199,6 +215,58 @@ class PyrolistenTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.client.stop_listening(), 1)
         with self.assertRaises(self.pg.ListenerStopped):
             await t2
+
+    async def test_list_ids_and_username_for_chat_and_user(self):
+        self.client.chats["@alice"] = SimpleNamespace(id=77)
+        task = asyncio.create_task(
+            self.client.listen(chat_id=["@room", 99], user_id=["@alice", 88], timeout=1)
+        )
+        await asyncio.sleep(0)
+
+        self.assertFalse(await self._dispatch(_msg(-10042, 12, "wrong user")))
+        self.assertTrue(await self._dispatch(_msg(99, 77, "matched")))
+        self.assertEqual((await task).text, "matched")
+
+    async def test_callback_query_listener_and_unallowed_click_alert(self):
+        alerts = []
+
+        def make_query(chat_id, user_id, msg_id, data):
+            async def answer(text=None, show_alert=False):
+                alerts.append((user_id, text, show_alert))
+
+            return SimpleNamespace(
+                message=SimpleNamespace(id=msg_id, chat=SimpleNamespace(id=chat_id)),
+                from_user=SimpleNamespace(id=user_id),
+                inline_message_id=None,
+                data=data,
+                answer=answer,
+            )
+
+        task = asyncio.create_task(
+            self.client.listen(
+                chat_id=1,
+                user_id=10,
+                listener_type=self.pl.ListenerTypes.CALLBACK_QUERY,
+                unallowed_click_alert="Not for you",
+                message_id=50,
+                timeout=1,
+            )
+        )
+        await asyncio.sleep(0)
+
+        self.assertFalse(
+            await self._dispatch_callback(make_query(1, 99, 50, "wrong_user"))
+        )
+        self.assertEqual(alerts, [(99, "Not for you", True)])
+        self.assertFalse(task.done())
+
+        self.assertTrue(await self._dispatch_callback(make_query(1, 10, 50, "ok")))
+        self.assertEqual((await task).data, "ok")
+
+    async def test_no_updates_raises_listener_stopped(self):
+        self.client.no_updates = True
+        with self.assertRaises(self.pg.ListenerStopped):
+            await self.client.listen(chat_id=1, timeout=1)
 
 
 if __name__ == "__main__":

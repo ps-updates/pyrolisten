@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pyrolisten"
-version = "0.1.2"
+version = "0.2.0"
 description = "listen() and ask() for Pyrogram, Kurigram and other Pyrogram forks"
 readme = "README.md"
 requires-python = ">=3.8"
