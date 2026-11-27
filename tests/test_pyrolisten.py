@@ -96,9 +96,16 @@ class PyrolistenTests(unittest.IsolatedAsyncioTestCase):
             return True
         return False
 
+    async def _wait_for_listeners(self, count=1):
+        for _ in range(20):
+            if len(getattr(self.client, "_pyrolisten_listeners", ())) >= count:
+                return
+            await asyncio.sleep(0)
+        self.fail(f"expected {count} listener(s) to register")
+
     async def test_listen_matches_and_ignores_outgoing(self):
         task = asyncio.create_task(self.client.listen(chat_id=1, user_id=10, timeout=1))
-        await asyncio.sleep(0)
+        await self._wait_for_listeners(1)
 
         self.assertFalse(await self._dispatch(_msg(1, 10, "self", outgoing=True)))
         self.assertFalse(await self._dispatch(_msg(1, 99, "wrong user")))
@@ -110,7 +117,7 @@ class PyrolistenTests(unittest.IsolatedAsyncioTestCase):
     async def test_user_specific_listener_beats_chat_wide(self):
         chat_wide = asyncio.create_task(self.client.listen(chat_id=1, timeout=1))
         user_only = asyncio.create_task(self.client.listen(chat_id=1, user_id=7, timeout=1))
-        await asyncio.sleep(0)
+        await self._wait_for_listeners(2)
 
         await self._dispatch(_msg(1, 7, "for user"))
         self.assertEqual((await user_only).text, "for user")
@@ -127,7 +134,7 @@ class PyrolistenTests(unittest.IsolatedAsyncioTestCase):
             self.client.listen(chat_id=1, user_id=1, filters=bad_filter, timeout=1)
         )
         healthy = asyncio.create_task(self.client.listen(chat_id=1, user_id=2, timeout=1))
-        await asyncio.sleep(0)
+        await self._wait_for_listeners(2)
 
         # Even when user_id=1 is checked first, user_id=2's listener still works.
         await self._dispatch(_msg(1, 1, "boom"))
@@ -155,8 +162,7 @@ class PyrolistenTests(unittest.IsolatedAsyncioTestCase):
 
         t1 = asyncio.create_task(self.client.listen(chat_id=1, user_id=1, timeout=1))
         t2 = asyncio.create_task(self.client.listen(chat_id=1, user_id=2, timeout=1))
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        await self._wait_for_listeners(2)
 
         self.assertEqual(len(self.client.handlers), 2)
         await self._dispatch(_msg(1, 1, "one"))
@@ -166,6 +172,7 @@ class PyrolistenTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_ask_attaches_request_and_cleans_up_on_send_error(self):
         task = asyncio.create_task(self.client.ask("@room", "Name?", timeout=1))
+        await self._wait_for_listeners(1)
         await asyncio.sleep(0)
         await self._dispatch(_msg(-10042, 5, "Alice"))
 
@@ -207,7 +214,7 @@ class PyrolistenTests(unittest.IsolatedAsyncioTestCase):
 
         t1 = asyncio.create_task(self.client.listen(chat_id=1, user_id=1, timeout=1))
         t2 = asyncio.create_task(self.client.listen(chat_id=2, user_id=2, timeout=1))
-        await asyncio.sleep(0)
+        await self._wait_for_listeners(2)
 
         self.assertEqual(self.client.cancel_listener(chat_id=1), 1)
         with self.assertRaises(self.pg.ListenerCanceled):
@@ -221,7 +228,7 @@ class PyrolistenTests(unittest.IsolatedAsyncioTestCase):
         task = asyncio.create_task(
             self.client.listen(chat_id=["@room", 99], user_id=["@alice", 88], timeout=1)
         )
-        await asyncio.sleep(0)
+        await self._wait_for_listeners(1)
 
         self.assertFalse(await self._dispatch(_msg(-10042, 12, "wrong user")))
         self.assertTrue(await self._dispatch(_msg(99, 77, "matched")))
@@ -252,7 +259,7 @@ class PyrolistenTests(unittest.IsolatedAsyncioTestCase):
                 timeout=1,
             )
         )
-        await asyncio.sleep(0)
+        await self._wait_for_listeners(1)
 
         self.assertFalse(
             await self._dispatch_callback(make_query(1, 99, 50, "wrong_user"))
