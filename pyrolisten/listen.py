@@ -87,18 +87,23 @@ async def _on_message(client, message):
     chat_id = chat.id if chat else None
     user_id = user.id if user else None
 
-    # listeners tied to a specific user win over chat-wide ones
-    for listener in sorted(listeners, key=lambda item: item.user_id is None):
+    # user-specific listeners are kept ahead of chat-wide ones on insert
+    for listener in list(listeners):
         if listener.future.done():
             continue
         if listener.chat_id is not None and listener.chat_id != chat_id:
             continue
         if listener.user_id is not None and listener.user_id != user_id:
             continue
-        if listener.filters is not None and not await _passes(
-            listener.filters, client, message
-        ):
-            continue
+        if listener.filters is not None:
+            try:
+                matched = await _passes(listener.filters, client, message)
+            except Exception as exc:
+                if not listener.future.done():
+                    listener.future.set_exception(exc)
+                continue
+            if not matched:
+                continue
         if listener.future.done():
             continue
         listener.future.set_result(message)
@@ -110,9 +115,36 @@ async def _on_message(client, message):
 async def _ensure_handler(client):
     if getattr(client, "_pyrolisten_handler", False):
         return
-    client._pyrolisten_handler = True
-    client.add_handler(_handlers.MessageHandler(_on_message), group=_HANDLER_GROUP)
-    await asyncio.sleep(0)  # let the library finish registering it
+    lock = getattr(client, "_pyrolisten_lock", None)
+    if lock is None:
+        lock = asyncio.Lock()
+        client._pyrolisten_lock = lock
+    async with lock:
+        if getattr(client, "_pyrolisten_handler", False):
+            return
+        client.add_handler(_handlers.MessageHandler(_on_message), group=_HANDLER_GROUP)
+        await asyncio.sleep(0)  # let the library finish registering it
+        client._pyrolisten_handler = True
+
+
+async def _register_listener(client, chat_id, user_id, filters):
+    if isinstance(chat_id, str):  # @username -> numeric id
+        chat_id = (await client.get_chat(chat_id)).id
+
+    await _ensure_handler(client)
+    listener = _Listener(
+        chat_id, user_id, asyncio.get_running_loop().create_future(), filters
+    )
+    store = _store(client)
+    if user_id is None:
+        store.append(listener)
+    else:
+        idx = next(
+            (i for i, item in enumerate(store) if item.user_id is None),
+            len(store),
+        )
+        store.insert(idx, listener)
+    return store, listener
 
 
 async def _await_listener(store: List[_Listener], listener: _Listener, timeout):
@@ -136,15 +168,7 @@ async def listen(self, chat_id=None, filters=None, timeout=60, user_id=None):
     timeout=None waits forever.
     Raises ListenerTimeout on timeout and ListenerCanceled if cancelled.
     """
-    if isinstance(chat_id, str):  # @username -> numeric id
-        chat_id = (await self.get_chat(chat_id)).id
-
-    await _ensure_handler(self)
-    listener = _Listener(
-        chat_id, user_id, asyncio.get_running_loop().create_future(), filters
-    )
-    store = _store(self)
-    store.append(listener)
+    store, listener = await _register_listener(self, chat_id, user_id, filters)
     return await _await_listener(store, listener, timeout)
 
 
@@ -158,20 +182,14 @@ async def ask(self, chat_id, text, filters=None, timeout=60, user_id=None, **sen
     has_text = bool(text and str(text).strip())
 
     if getattr(self.listen, "_pyrolisten", False):
-        if isinstance(chat_id, str):  # @username -> numeric id
-            chat_id = (await self.get_chat(chat_id)).id
-
-        await _ensure_handler(self)
-        listener = _Listener(
-            chat_id, user_id, asyncio.get_running_loop().create_future(), filters
-        )
-        store = _store(self)
-        store.append(listener)
+        store, listener = await _register_listener(self, chat_id, user_id, filters)
 
         request = None
         try:
             if has_text:
-                request = await self.send_message(chat_id, text, **send_kwargs)
+                request = await self.send_message(
+                    listener.chat_id, text, **send_kwargs
+                )
                 if getattr(request, "chat", None) is not None:
                     listener.chat_id = request.chat.id
         except BaseException:
@@ -186,7 +204,8 @@ async def ask(self, chat_id, text, filters=None, timeout=60, user_id=None, **sen
         request = None
         if has_text:
             request = await self.send_message(chat_id, text, **send_kwargs)
-            chat_id = request.chat.id
+            if getattr(request, "chat", None) is not None:
+                chat_id = request.chat.id
 
         kwargs = {"filters": filters, "timeout": timeout}
         if user_id is not None:  # keeps this working with listen() from other libs
