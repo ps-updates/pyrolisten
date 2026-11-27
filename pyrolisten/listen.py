@@ -2,8 +2,8 @@
 pyrolisten.listen - Client.listen(), Client.ask() and Client.cancel_listener()
 for Pyrogram and its forks.
 
-Works with anything that installs a `pyrogram` module (Pyrogram, Kurigram,
-WZGram, ...). Methods the installed library already provides are never overridden.
+Works with anything that installs a `pyrogram` module (Pyrogram, Kurigram, ...).
+Methods the installed library already provides are never overridden.
 
 Usage:  import pyrolisten.listen   # (or just `import pyrolisten`) once, at startup
 """
@@ -38,7 +38,7 @@ def _load_backend():
         return importlib.import_module("pyrogram")
     except ImportError as exc:
         raise ImportError(
-            "pyrolisten needs Pyrogram or a compatible fork (kurigram, wzgram, ...). "
+            "pyrolisten needs Pyrogram or a compatible fork (kurigram, ...). "
             'Install one, e.g.: pip install "pyrolisten[kurigram]"'
         ) from exc
 
@@ -115,6 +115,18 @@ async def _ensure_handler(client):
     await asyncio.sleep(0)  # let the library finish registering it
 
 
+async def _await_listener(store: List[_Listener], listener: _Listener, timeout):
+    try:
+        return await asyncio.wait_for(listener.future, timeout)
+    except asyncio.TimeoutError:
+        raise ListenerTimeout(f"no answer within {timeout}s") from None
+    finally:
+        try:
+            store.remove(listener)
+        except ValueError:
+            pass
+
+
 # --------------------------------------------------------------------------- #
 # Client methods
 # --------------------------------------------------------------------------- #
@@ -133,15 +145,7 @@ async def listen(self, chat_id=None, filters=None, timeout=60, user_id=None):
     )
     store = _store(self)
     store.append(listener)
-    try:
-        return await asyncio.wait_for(listener.future, timeout)
-    except asyncio.TimeoutError:
-        raise ListenerTimeout(f"no answer within {timeout}s") from None
-    finally:
-        try:
-            store.remove(listener)
-        except ValueError:
-            pass
+    return await _await_listener(store, listener, timeout)
 
 
 async def ask(self, chat_id, text, filters=None, timeout=60, user_id=None, **send_kwargs):
@@ -151,15 +155,43 @@ async def ask(self, chat_id, text, filters=None, timeout=60, user_id=None, **sen
     as `response.request` (also `response.sent_message`). A blank `text` skips
     sending and only listens.
     """
-    request = None
-    if text and str(text).strip():
-        request = await self.send_message(chat_id, text, **send_kwargs)
-        chat_id = request.chat.id
+    has_text = bool(text and str(text).strip())
 
-    kwargs = {"filters": filters, "timeout": timeout}
-    if user_id is not None:  # keeps this working with listen() from other libs
-        kwargs["user_id"] = user_id
-    response = await self.listen(chat_id, **kwargs)
+    if getattr(self.listen, "_pyrolisten", False):
+        if isinstance(chat_id, str):  # @username -> numeric id
+            chat_id = (await self.get_chat(chat_id)).id
+
+        await _ensure_handler(self)
+        listener = _Listener(
+            chat_id, user_id, asyncio.get_running_loop().create_future(), filters
+        )
+        store = _store(self)
+        store.append(listener)
+
+        request = None
+        try:
+            if has_text:
+                request = await self.send_message(chat_id, text, **send_kwargs)
+                if getattr(request, "chat", None) is not None:
+                    listener.chat_id = request.chat.id
+        except BaseException:
+            try:
+                store.remove(listener)
+            except ValueError:
+                pass
+            raise
+
+        response = await _await_listener(store, listener, timeout)
+    else:
+        request = None
+        if has_text:
+            request = await self.send_message(chat_id, text, **send_kwargs)
+            chat_id = request.chat.id
+
+        kwargs = {"filters": filters, "timeout": timeout}
+        if user_id is not None:  # keeps this working with listen() from other libs
+            kwargs["user_id"] = user_id
+        response = await self.listen(chat_id, **kwargs)
 
     if response is not None:
         for attr in ("request", "sent_message"):
@@ -203,14 +235,20 @@ _install("cancel_listener", cancel_listener)
 _install("stop_listening", cancel_listener)
 
 
-# Make the exceptions importable straight from the Pyrogram package, e.g.
-#   from pyrogram import ListenerTimeout, ListenerCanceled
+try:
+    _errors = importlib.import_module(_pg.__name__ + ".errors")
+except ImportError:
+    _errors = getattr(_pg, "errors", None)
+
+# Make the exceptions importable straight from `pyrogram` and `pyrogram.errors`
 # (never overrides a name the installed library already defines)
-for _name, _exc in (
-    ("ListenerTimeout", ListenerTimeout),
-    ("ListenerCanceled", ListenerCanceled),
-    ("ListenerCancelled", ListenerCanceled),
-    ("ListenerStopped", ListenerCanceled),
-):
-    if not hasattr(_pg, _name):
-        setattr(_pg, _name, _exc)
+_targets = (_pg, _errors) if _errors is not None else (_pg,)
+for _target in _targets:
+    for _name, _exc in (
+        ("ListenerTimeout", ListenerTimeout),
+        ("ListenerCanceled", ListenerCanceled),
+        ("ListenerCancelled", ListenerCanceled),
+        ("ListenerStopped", ListenerCanceled),
+    ):
+        if not hasattr(_target, _name):
+            setattr(_target, _name, _exc)

@@ -6,18 +6,18 @@ Methods your library already provides are never overridden.
 ## Install
 
 ```bash
-pip install git+https://github.com/ps-updates/pyrolisten.git
+pip install pyrolisten
 ```
 
 pyrolisten does not force a Pyrogram library on you, because most forks install the same
 `pyrogram` module and two of them in one environment break each other. If you already have one
-(`pyrogram`, `kurigram`, `wzgram`, ...), you're done. If not, pick one with an extra:
+(`pyrogram`, `kurigram`, ...), you're done. If not, pick one with an extra:
 
 ```bash
-pip install "pyrolisten[kurigram] @ git+https://github.com/ps-updates/pyrolisten.git"
+pip install "pyrolisten[kurigram]"
 ```
 
-Extras: `pyrogram`, `kurigram`, `wzgram`. Choose **one**.
+Extras: `pyrogram`, `kurigram`. Choose **one**.
 
 ## Usage
 
@@ -51,10 +51,11 @@ app.run()
 | `await client.ask(chat_id, text, filters=None, timeout=60, user_id=None, **send_kwargs)` | Send `text`, then wait. The sent message is `response.request`. |
 | `client.cancel_listener(chat_id=None, user_id=None)` | Cancel pending listeners (all if no arguments). Returns the count. Alias: `stop_listening`. |
 
-After `import pyrolisten.listen` the exceptions can be imported from `pyrogram` itself
-(`from pyrogram import ListenerTimeout, ListenerCanceled`), or from `pyrolisten`. This needs
+After `import pyrolisten.listen` the exceptions can be imported from `pyrogram`
+(`from pyrogram import ListenerTimeout, ListenerCanceled`), `pyrogram.errors`
+(`from pyrogram.errors import ListenerTimeout`), or directly from `pyrolisten`. This needs
 `pyrolisten.listen` to be imported **first**; editors and type checkers won't know about
-these names, so `from pyrolisten import ...` is the safer choice for typed projects.
+patched names on `pyrogram`, so `from pyrolisten import ...` is the safer choice for typed projects.
 
 Exceptions: `ListenerTimeout` (also an `asyncio.TimeoutError`) and `ListenerCanceled`
 (aliases: `ListenerCancelled`, `ListenerStopped`).

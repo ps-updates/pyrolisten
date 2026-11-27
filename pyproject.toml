@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pyrolisten"
-version = "0.1.0"
+version = "0.1.1"
 description = "listen() and ask() for Pyrogram, Kurigram and other Pyrogram forks"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -19,9 +19,8 @@ keywords = ["telegram", "pyrogram", "kurigram", "conversation", "listen", "ask"]
 dependencies = []
 
 [project.optional-dependencies]
-pyrogram  = ["pyrogram"]
-kurigram  = ["kurigram"]
-wzgram    = ["wzgram"]
+pyrogram = ["pyrogram"]
+kurigram = ["kurigram"]
 
 [project.urls]
 Homepage = "https://github.com/ps-updates/pyrolisten"
