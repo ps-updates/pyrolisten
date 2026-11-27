@@ -47,9 +47,11 @@ app.run()
 
 | Method | Description |
 |---|---|
-| `await client.listen(chat_id=None, filters=None, timeout=60, user_id=None, listener_type=ListenerTypes.MESSAGE, unallowed_click_alert=True, message_id=None, inline_message_id=None)` | Wait for the next matching message or callback query. `chat_id`/`user_id` accept an ID, `@username`, or list of them. `timeout=None` waits forever. |
-| `await client.ask(chat_id, text, filters=None, timeout=60, user_id=None, listener_type=ListenerTypes.MESSAGE, unallowed_click_alert=True, message_id=None, inline_message_id=None, **send_kwargs)` | Send `text` (to `chat_id[0]` if a list), then wait. The sent message is `response.request` / `response.sent_message`. |
+| `await client.listen(chat_id=None, filters=None, timeout=..., user_id=None, listener_type=ListenerTypes.MESSAGE, unallowed_click_alert=True, message_id=None, inline_message_id=None)` | Wait for the next matching message or callback query. `chat_id`/`user_id` accept an ID, `@username`, or list of them. `timeout` defaults to `client.listener_timeout` (`60`s); `timeout=None` waits forever. |
+| `await client.ask(chat_id, text, filters=None, timeout=..., user_id=None, listener_type=ListenerTypes.MESSAGE, unallowed_click_alert=True, message_id=None, inline_message_id=None, **send_kwargs)` | Send `text` (to `chat_id[0]` if a list), then wait. The sent message is `response.request` / `response.sent_message`. |
 | `client.cancel_listener(chat_id=None, user_id=None)` | Cancel pending listeners (all if no arguments). Returns the count. Alias: `stop_listening`. |
+| `await message.chat.ask(text, ...)` / `await message.chat.listen(...)` | Shortcuts bound to that chat (also `chat.cancel_listener()`). |
+| `await message.from_user.ask(text, ...)` / `await message.from_user.listen(...)` | Shortcuts bound to that user (also `user.cancel_listener()`). |
 
 After `import pyrolisten.listen` the exceptions can be imported from `pyrogram`
 (`from pyrogram import ListenerTimeout, ListenerCanceled`), `pyrogram.errors`

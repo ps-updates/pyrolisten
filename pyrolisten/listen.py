@@ -37,6 +37,7 @@ class ListenerTypes(str, Enum):
     CALLBACK_QUERY = "callback_query"
 
 _HANDLER_GROUP = -999
+_UNSET = object()
 
 
 # --------------------------------------------------------------------------- #
@@ -256,7 +257,9 @@ async def _register_listener(
     return store, listener
 
 
-async def _await_listener(store: List[_Listener], listener: _Listener, timeout):
+async def _await_listener(store: List[_Listener], listener: _Listener, timeout, client=None):
+    if timeout is _UNSET:
+        timeout = getattr(client, "listener_timeout", 60)
     try:
         return await asyncio.wait_for(listener.future, timeout)
     except asyncio.TimeoutError:
@@ -275,7 +278,7 @@ async def listen(
     self,
     chat_id=None,
     filters=None,
-    timeout=60,
+    timeout=_UNSET,
     user_id=None,
     listener_type=ListenerTypes.MESSAGE,
     unallowed_click_alert=True,
@@ -284,7 +287,7 @@ async def listen(
 ):
     """Wait for the next matching message or callback query and return it.
 
-    timeout=None waits forever.
+    timeout defaults to client.listener_timeout (60s); timeout=None waits forever.
     Raises ListenerTimeout on timeout and ListenerCanceled if cancelled.
     """
     store, listener = await _register_listener(
@@ -297,7 +300,7 @@ async def listen(
         message_id=message_id,
         inline_message_id=inline_message_id,
     )
-    return await _await_listener(store, listener, timeout)
+    return await _await_listener(store, listener, timeout, self)
 
 
 async def ask(
@@ -305,7 +308,7 @@ async def ask(
     chat_id,
     text,
     filters=None,
-    timeout=60,
+    timeout=_UNSET,
     user_id=None,
     listener_type=ListenerTypes.MESSAGE,
     unallowed_click_alert=True,
@@ -350,7 +353,7 @@ async def ask(
                 pass
             raise
 
-        response = await _await_listener(store, listener, timeout)
+        response = await _await_listener(store, listener, timeout, self)
     else:
         request = None
         target_chat = chat_id[0] if isinstance(chat_id, (list, tuple)) else chat_id
@@ -361,7 +364,10 @@ async def ask(
             ):
                 chat_id = request.chat.id
 
-        kwargs = {"filters": filters, "timeout": timeout}
+        resolved_timeout = (
+            getattr(self, "listener_timeout", 60) if timeout is _UNSET else timeout
+        )
+        kwargs = {"filters": filters, "timeout": resolved_timeout}
         if user_id is not None:  # keeps this working with listen() from other libs
             kwargs["user_id"] = user_id
         response = await self.listen(chat_id, **kwargs)
@@ -397,19 +403,97 @@ def cancel_listener(self, chat_id=None, user_id=None) -> int:
     return cancelled
 
 
-def _install(name, func):
-    existing = getattr(Client, name, None)
+def _install_on(target, name, func):
+    existing = getattr(target, name, None)
     if existing is not None and not getattr(existing, "_pyrolisten", False):
         return False  # the installed library already provides it
     func._pyrolisten = True
-    setattr(Client, name, func)
+    setattr(target, name, func)
     return True
 
 
-_install("listen", listen)
-_install("ask", ask)
-_install("cancel_listener", cancel_listener)
-_install("stop_listening", cancel_listener)
+_install_on(Client, "listen", listen)
+_install_on(Client, "ask", ask)
+_install_on(Client, "cancel_listener", cancel_listener)
+_install_on(Client, "stop_listening", cancel_listener)
+
+
+# --------------------------------------------------------------------------- #
+# Chat & User shortcuts (pyromod-style: message.chat.ask(), message.from_user.ask())
+# --------------------------------------------------------------------------- #
+def _bound_client(obj):
+    client = getattr(obj, "_client", None)
+    if client is None:
+        raise RuntimeError("This object is not bound to a Pyrogram Client.")
+    return client
+
+
+async def _chat_listen(self, filters=None, timeout=_UNSET, user_id=None, **kwargs):
+    return await _bound_client(self).listen(
+        self.id, filters=filters, timeout=timeout, user_id=user_id, **kwargs
+    )
+
+
+async def _chat_ask(self, text, filters=None, timeout=_UNSET, user_id=None, **kwargs):
+    return await _bound_client(self).ask(
+        self.id, text, filters=filters, timeout=timeout, user_id=user_id, **kwargs
+    )
+
+
+def _chat_cancel(self, user_id=None) -> int:
+    return _bound_client(self).cancel_listener(self.id, user_id=user_id)
+
+
+async def _user_listen(self, chat_id=None, filters=None, timeout=_UNSET, **kwargs):
+    return await _bound_client(self).listen(
+        chat_id=chat_id, filters=filters, timeout=timeout, user_id=self.id, **kwargs
+    )
+
+
+async def _user_ask(self, text, chat_id=None, filters=None, timeout=_UNSET, **kwargs):
+    return await _bound_client(self).ask(
+        self.id if chat_id is None else chat_id,
+        text,
+        filters=filters,
+        timeout=timeout,
+        user_id=self.id,
+        **kwargs,
+    )
+
+
+def _user_cancel(self, chat_id=None) -> int:
+    return _bound_client(self).cancel_listener(chat_id=chat_id, user_id=self.id)
+
+
+try:
+    _types = importlib.import_module(_pg.__name__ + ".types")
+except ImportError:
+    _types = getattr(_pg, "types", None)
+
+for _cls_name, _methods in (
+    (
+        "Chat",
+        (
+            ("listen", _chat_listen),
+            ("ask", _chat_ask),
+            ("cancel_listener", _chat_cancel),
+            ("stop_listening", _chat_cancel),
+        ),
+    ),
+    (
+        "User",
+        (
+            ("listen", _user_listen),
+            ("ask", _user_ask),
+            ("cancel_listener", _user_cancel),
+            ("stop_listening", _user_cancel),
+        ),
+    ),
+):
+    _cls = getattr(_types, _cls_name, None) if _types is not None else None
+    if _cls is not None:
+        for _mname, _mfunc in _methods:
+            _install_on(_cls, _mname, _mfunc)
 
 
 try:

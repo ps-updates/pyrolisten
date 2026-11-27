@@ -43,6 +43,16 @@ def _install_fake_pyrogram():
         def __init__(self, callback):
             self.callback = callback
 
+    class Chat:
+        def __init__(self, chat_id, client):
+            self.id = chat_id
+            self._client = client
+
+    class User:
+        def __init__(self, user_id, client):
+            self.id = user_id
+            self._client = client
+
     pg = types.ModuleType("pyrogram")
     pg.Client = FakeClient
     pg.StopPropagation = StopPropagation
@@ -53,15 +63,20 @@ def _install_fake_pyrogram():
 
     errors = types.ModuleType("pyrogram.errors")
     enums = types.ModuleType("pyrogram.enums")
+    pg_types = types.ModuleType("pyrogram.types")
+    pg_types.Chat = Chat
+    pg_types.User = User
 
     pg.handlers = handlers
     pg.errors = errors
     pg.enums = enums
+    pg.types = pg_types
 
     sys.modules["pyrogram"] = pg
     sys.modules["pyrogram.handlers"] = handlers
     sys.modules["pyrogram.errors"] = errors
     sys.modules["pyrogram.enums"] = enums
+    sys.modules["pyrogram.types"] = pg_types
     return pg
 
 
@@ -274,6 +289,36 @@ class PyrolistenTests(unittest.IsolatedAsyncioTestCase):
         self.client.no_updates = True
         with self.assertRaises(self.pg.ListenerStopped):
             await self.client.listen(chat_id=1, timeout=1)
+
+    async def test_client_listener_timeout_default(self):
+        self.client.listener_timeout = 0.01
+        with self.assertRaises(self.pg.ListenerTimeout):
+            await self.client.listen(chat_id=1)
+
+    async def test_chat_and_user_shortcuts(self):
+        chat = self.pg.types.Chat(11, self.client)
+        user = self.pg.types.User(22, self.client)
+
+        chat_task = asyncio.create_task(chat.ask("Hi chat", timeout=1))
+        await self._wait_for_listeners(1)
+        await asyncio.sleep(0)
+        await self._dispatch(_msg(11, 99, "from chat"))
+        chat_reply = await chat_task
+        self.assertEqual(chat_reply.text, "from chat")
+        self.assertEqual(chat_reply.request.text, "Hi chat")
+
+        user_task = asyncio.create_task(user.ask("Hi user", chat_id=11, timeout=1))
+        await self._wait_for_listeners(1)
+        await asyncio.sleep(0)
+        self.assertFalse(await self._dispatch(_msg(11, 99, "wrong user")))
+        self.assertTrue(await self._dispatch(_msg(11, 22, "from user")))
+        self.assertEqual((await user_task).text, "from user")
+
+        pending = asyncio.create_task(chat.listen(timeout=1))
+        await self._wait_for_listeners(1)
+        self.assertEqual(chat.cancel_listener(), 1)
+        with self.assertRaises(self.pg.ListenerCanceled):
+            await pending
 
 
 if __name__ == "__main__":
