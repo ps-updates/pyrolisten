@@ -13,6 +13,16 @@ authors = [
     { name = "Maharam Ali Khan", email = "psupdates74@gmail.com" },
 ]
 keywords = ["telegram", "pyrogram", "kurigram", "conversation", "listen", "ask"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 # No hard dependency on purpose: most Pyrogram forks install the same `pyrogram`
 # module, so a required one would clash with the fork the user already has.
 # Users pick their library with an extra instead, e.g. pip install "pyrolisten[kurigram]".
