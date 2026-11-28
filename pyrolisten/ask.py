@@ -51,6 +51,13 @@ async def ask(
                     listener.chat_ids is None or len(listener.chat_ids) == 1
                 ):
                     listener.chat_ids = (request.chat.id,)
+                if (
+                    listener.listener_type == "callback_query"
+                    and listener.message_ids is None
+                    and listener.inline_message_ids is None
+                    and getattr(request, "id", None) is not None
+                ):
+                    listener.message_ids = (request.id,)
         except BaseException:
             try:
                 store.remove(listener)

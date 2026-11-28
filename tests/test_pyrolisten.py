@@ -31,7 +31,12 @@ def _install_fake_pyrogram():
             return self.chats[chat_id]
 
         async def send_message(self, chat_id, text, **kwargs):
-            msg = SimpleNamespace(chat=SimpleNamespace(id=chat_id), text=text, kwargs=kwargs)
+            msg = SimpleNamespace(
+                id=len(self.sent) + 100,
+                chat=SimpleNamespace(id=chat_id),
+                text=text,
+                kwargs=kwargs,
+            )
             self.sent.append(msg)
             return msg
 
@@ -321,6 +326,31 @@ class PyrolistenTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chat.cancel_listener(), 1)
         with self.assertRaises(self.pg.errors.ListenerCanceled):
             await pending
+
+    async def test_ask_callback_query_autobinds_message_id(self):
+        async def answer(text=None, show_alert=False):
+            return None
+
+        def make_query(msg_id, data):
+            return SimpleNamespace(
+                message=SimpleNamespace(id=msg_id, chat=SimpleNamespace(id=1)),
+                from_user=SimpleNamespace(id=10),
+                inline_message_id=None,
+                data=data,
+                answer=answer,
+            )
+
+        task = asyncio.create_task(
+            self.client.ask(1, "Confirm?", user_id=10, listener_type="callback_query", timeout=1)
+        )
+        await self._wait_for_listeners(1)
+        await asyncio.sleep(0)
+
+        self.assertFalse(await self._dispatch_callback(make_query(99, "old")))
+        self.assertTrue(await self._dispatch_callback(make_query(100, "new")))
+        reply = await task
+        self.assertEqual(reply.data, "new")
+        self.assertEqual(reply.request.id, 100)
 
 
 if __name__ == "__main__":
