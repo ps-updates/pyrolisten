@@ -11,7 +11,6 @@ import asyncio
 import importlib
 import inspect
 from dataclasses import dataclass
-from enum import Enum
 from typing import Any, List, Optional, Tuple, Union
 
 from .exceptions import (
@@ -26,15 +25,7 @@ __all__ = [
     "ListenerCancelled",
     "ListenerStopped",
     "ListenerTimeout",
-    "ListenerTypes",
 ]
-
-
-class ListenerTypes(str, Enum):
-    """Update types supported by listen() and ask()."""
-
-    MESSAGE = "message"
-    CALLBACK_QUERY = "callback_query"
 
 _HANDLER_GROUP = -999
 _UNSET = object()
@@ -137,7 +128,7 @@ async def _dispatch(
             continue
         if listener.user_ids is not None and user_id not in listener.user_ids:
             if (
-                listener_type == ListenerTypes.CALLBACK_QUERY
+                listener_type == "callback_query"
                 and listener.unallowed_click_alert
             ):
                 alert_text = (
@@ -175,7 +166,7 @@ async def _on_message(client, message):
     await _dispatch(
         client,
         message,
-        ListenerTypes.MESSAGE,
+        "message",
         chat.id if chat else None,
         user.id if user else None,
         getattr(message, "id", None),
@@ -189,7 +180,7 @@ async def _on_callback_query(client, query):
     await _dispatch(
         client,
         query,
-        ListenerTypes.CALLBACK_QUERY,
+        "callback_query",
         chat.id if chat else None,
         user.id if user else None,
         getattr(msg, "id", None) if msg else None,
@@ -220,7 +211,7 @@ async def _register_listener(
     chat_id,
     user_id,
     filters,
-    listener_type=ListenerTypes.MESSAGE,
+    listener_type="message",
     unallowed_click_alert=True,
     message_id=None,
     inline_message_id=None,
@@ -230,7 +221,7 @@ async def _register_listener(
             "Cannot listen for updates on a client started with no_updates"
         )
 
-    ltype = listener_type.value if isinstance(listener_type, Enum) else listener_type
+    ltype = str(listener_type)
     chat_ids = await _resolve_ids(client, chat_id)
     user_ids = await _resolve_ids(client, user_id)
 
@@ -280,7 +271,7 @@ async def listen(
     filters=None,
     timeout=_UNSET,
     user_id=None,
-    listener_type=ListenerTypes.MESSAGE,
+    listener_type="message",
     unallowed_click_alert=True,
     message_id=None,
     inline_message_id=None,
@@ -301,84 +292,6 @@ async def listen(
         inline_message_id=inline_message_id,
     )
     return await _await_listener(store, listener, timeout, self)
-
-
-async def ask(
-    self,
-    chat_id,
-    text,
-    filters=None,
-    timeout=_UNSET,
-    user_id=None,
-    listener_type=ListenerTypes.MESSAGE,
-    unallowed_click_alert=True,
-    message_id=None,
-    inline_message_id=None,
-    **send_kwargs,
-):
-    """Send `text` to chat_id, then wait for the answer (see listen()).
-
-    When `chat_id` is a list, the prompt goes to `chat_id[0]` and any listed
-    chat may answer. Extra keyword arguments go to send_message(). The sent
-    message is available as `response.request` (also `response.sent_message`).
-    A blank `text` skips sending and only listens.
-    """
-    has_text = bool(text and str(text).strip())
-
-    if getattr(self.listen, "_pyrolisten", False):
-        store, listener = await _register_listener(
-            self,
-            chat_id,
-            user_id,
-            filters,
-            listener_type=listener_type,
-            unallowed_click_alert=unallowed_click_alert,
-            message_id=message_id,
-            inline_message_id=inline_message_id,
-        )
-
-        request = None
-        try:
-            if has_text:
-                target_chat = listener.chat_ids[0] if listener.chat_ids else chat_id
-                request = await self.send_message(target_chat, text, **send_kwargs)
-                if getattr(request, "chat", None) is not None and (
-                    listener.chat_ids is None or len(listener.chat_ids) == 1
-                ):
-                    listener.chat_ids = (request.chat.id,)
-        except BaseException:
-            try:
-                store.remove(listener)
-            except ValueError:
-                pass
-            raise
-
-        response = await _await_listener(store, listener, timeout, self)
-    else:
-        request = None
-        target_chat = chat_id[0] if isinstance(chat_id, (list, tuple)) else chat_id
-        if has_text:
-            request = await self.send_message(target_chat, text, **send_kwargs)
-            if getattr(request, "chat", None) is not None and not isinstance(
-                chat_id, (list, tuple)
-            ):
-                chat_id = request.chat.id
-
-        resolved_timeout = (
-            getattr(self, "listener_timeout", 60) if timeout is _UNSET else timeout
-        )
-        kwargs = {"filters": filters, "timeout": resolved_timeout}
-        if user_id is not None:  # keeps this working with listen() from other libs
-            kwargs["user_id"] = user_id
-        response = await self.listen(chat_id, **kwargs)
-
-    if response is not None:
-        for attr in ("request", "sent_message"):
-            try:
-                setattr(response, attr, request)
-            except Exception:
-                pass
-    return response
 
 
 def cancel_listener(self, chat_id=None, user_id=None) -> int:
@@ -413,7 +326,6 @@ def _install_on(target, name, func):
 
 
 _install_on(Client, "listen", listen)
-_install_on(Client, "ask", ask)
 _install_on(Client, "cancel_listener", cancel_listener)
 _install_on(Client, "stop_listening", cancel_listener)
 
@@ -501,24 +413,14 @@ try:
 except ImportError:
     _errors = getattr(_pg, "errors", None)
 
-# Make the exceptions importable straight from `pyrogram` and `pyrogram.errors`
+# Make the exceptions importable from `pyrogram.errors` only
 # (never overrides a name the installed library already defines)
-_targets = (_pg, _errors) if _errors is not None else (_pg,)
-for _target in _targets:
+if _errors is not None:
     for _name, _exc in (
         ("ListenerTimeout", ListenerTimeout),
         ("ListenerCanceled", ListenerCanceled),
         ("ListenerCancelled", ListenerCanceled),
         ("ListenerStopped", ListenerCanceled),
-        ("ListenerTypes", ListenerTypes),
     ):
-        if not hasattr(_target, _name):
-            setattr(_target, _name, _exc)
-
-try:
-    _enums = importlib.import_module(_pg.__name__ + ".enums")
-except ImportError:
-    _enums = getattr(_pg, "enums", None)
-
-if _enums is not None and not hasattr(_enums, "ListenerTypes"):
-    setattr(_enums, "ListenerTypes", ListenerTypes)
+        if not hasattr(_errors, _name):
+            setattr(_errors, _name, _exc)

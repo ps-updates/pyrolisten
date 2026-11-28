@@ -3,20 +3,19 @@
     import pyrolisten.listen   # pyromod style
     import pyrolisten          # also works
 """
-from . import listen  # applies the patches on import
+from . import ask, listen  # applies the patches on import
 from .exceptions import (
     ListenerCanceled,
     ListenerCancelled,
     ListenerStopped,
     ListenerTimeout,
 )
-from .listen import ListenerTypes
 
 __all__ = [
+    "ask",
     "listen",
     "ListenerCanceled",
     "ListenerCancelled",
     "ListenerStopped",
     "ListenerTimeout",
-    "ListenerTypes",
 ]

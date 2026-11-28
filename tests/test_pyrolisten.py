@@ -224,7 +224,9 @@ class PyrolistenTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(reply.request)
 
     async def test_timeout_and_cancel_listener(self):
-        with self.assertRaises(self.pg.ListenerTimeout):
+        self.assertFalse(hasattr(self.pg, "ListenerTimeout"))
+        self.assertFalse(hasattr(self.pg, "ListenerCanceled"))
+        with self.assertRaises(self.pg.errors.ListenerTimeout):
             await self.client.listen(chat_id=1, timeout=0.01)
 
         t1 = asyncio.create_task(self.client.listen(chat_id=1, user_id=1, timeout=1))
@@ -232,10 +234,10 @@ class PyrolistenTests(unittest.IsolatedAsyncioTestCase):
         await self._wait_for_listeners(2)
 
         self.assertEqual(self.client.cancel_listener(chat_id=1), 1)
-        with self.assertRaises(self.pg.ListenerCanceled):
+        with self.assertRaises(self.pg.errors.ListenerCanceled):
             await t1
         self.assertEqual(self.client.stop_listening(), 1)
-        with self.assertRaises(self.pg.ListenerStopped):
+        with self.assertRaises(self.pg.errors.ListenerStopped):
             await t2
 
     async def test_list_ids_and_username_for_chat_and_user(self):
@@ -268,7 +270,7 @@ class PyrolistenTests(unittest.IsolatedAsyncioTestCase):
             self.client.listen(
                 chat_id=1,
                 user_id=10,
-                listener_type=self.pl.ListenerTypes.CALLBACK_QUERY,
+                listener_type="callback_query",
                 unallowed_click_alert="Not for you",
                 message_id=50,
                 timeout=1,
@@ -287,12 +289,12 @@ class PyrolistenTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_no_updates_raises_listener_stopped(self):
         self.client.no_updates = True
-        with self.assertRaises(self.pg.ListenerStopped):
+        with self.assertRaises(self.pg.errors.ListenerStopped):
             await self.client.listen(chat_id=1, timeout=1)
 
     async def test_client_listener_timeout_default(self):
         self.client.listener_timeout = 0.01
-        with self.assertRaises(self.pg.ListenerTimeout):
+        with self.assertRaises(self.pg.errors.ListenerTimeout):
             await self.client.listen(chat_id=1)
 
     async def test_chat_and_user_shortcuts(self):
@@ -317,7 +319,7 @@ class PyrolistenTests(unittest.IsolatedAsyncioTestCase):
         pending = asyncio.create_task(chat.listen(timeout=1))
         await self._wait_for_listeners(1)
         self.assertEqual(chat.cancel_listener(), 1)
-        with self.assertRaises(self.pg.ListenerCanceled):
+        with self.assertRaises(self.pg.errors.ListenerCanceled):
             await pending
 
 

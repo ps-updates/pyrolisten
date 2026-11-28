@@ -1,74 +1,98 @@
 # pyrolisten
 
-`client.listen()` and `client.ask()` for **Pyrogram, Kurigram and other Pyrogram forks**.
-Methods your library already provides are never overridden.
+[![PyPI version](https://img.shields.io/pypi/v/pyrolisten.svg)](https://pypi.org/project/pyrolisten/)
+[![Python versions](https://img.shields.io/pypi/pyversions/pyrolisten.svg)](https://pypi.org/project/pyrolisten/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## Install
+`pyromod`-style `listen()`, `ask()`, and `cancel_listener()` for **Pyrogram, Kurigram, and other Pyrogram forks** — without overriding methods your library already provides.
+
+## Features
+
+- **`client.listen()` & `client.ask()`** for waiting on messages and inline button clicks (`listener_type="callback_query"`).
+- **Chat & User shortcuts:** `message.chat.ask(...)`, `message.chat.listen(...)`, `message.from_user.ask(...)`, and `message.from_user.listen(...)`.
+- **Flexible targeting:** Pass a numeric ID, `@username`, or a list of IDs/`@username`s to `chat_id` and `user_id`.
+- **Fork-safe:** Never overwrites `listen`, `ask`, or `cancel_listener` if your installed fork already defines them.
+- **Zero runtime dependencies:** Works alongside whichever `pyrogram`-compatible package you already have installed.
+
+## Installation
 
 ```bash
 pip install pyrolisten
 ```
 
-pyrolisten does not force a Pyrogram library on you, because most forks install the same
-`pyrogram` module and two of them in one environment break each other. If you already have one
-(`pyrogram`, `kurigram`, ...), you're done. If not, pick one with an extra:
+`pyrolisten` does not force a Pyrogram dependency because forks share the `pyrogram` module name and installing two in the same environment conflicts. If you don't have one installed yet, pick **one** extra:
 
 ```bash
 pip install "pyrolisten[kurigram]"
+# or
+pip install "pyrolisten[pyrogram]"
 ```
 
-Extras: `pyrogram`, `kurigram`. Choose **one**.
+## Quick Start
 
-## Usage
+Import `pyrolisten.listen` (or `import pyrolisten`) **once at startup** before loading your handlers:
 
 ```python
-import pyrolisten.listen        # once, at startup (e.g. main.py), before your plugins load
-from pyrogram import Client, filters, ListenerTimeout, ListenerCanceled
+import pyrolisten.listen
+from pyrogram import Client, filters
+from pyrogram.errors import ListenerTimeout, ListenerCanceled
 
 app = Client("my_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app.listener_timeout = 30  # optional default timeout in seconds (default: 60)
 
 @app.on_message(filters.command("name"))
-async def name(client, message):
+async def ask_name(client, message):
     try:
-        reply = await client.ask(
-            message.chat.id, "What's your name?",
-            user_id=message.from_user.id, timeout=30,
+        reply = await message.chat.ask(
+            "What's your name?",
+            user_id=message.from_user.id,
         )
         await reply.reply(f"Hi {reply.text}!")
     except ListenerTimeout:
         await message.reply("Too slow!")
     except ListenerCanceled:
-        pass  # client.cancel_listener(...) was called
+        pass  # cancelled via cancel_listener()
 
 app.run()
 ```
 
-## API
+### Waiting for Inline Button Clicks
+
+```python
+sent = await message.reply("Confirm?", reply_markup=keyboard)
+query = await client.listen(
+    chat_id=message.chat.id,
+    user_id=message.from_user.id,
+    listener_type="callback_query",
+    message_id=sent.id,
+    unallowed_click_alert="This button is not for you.",
+)
+await query.answer("Confirmed!")
+```
+
+## API Reference
 
 | Method | Description |
 |---|---|
-| `await client.listen(chat_id=None, filters=None, timeout=..., user_id=None, listener_type=ListenerTypes.MESSAGE, unallowed_click_alert=True, message_id=None, inline_message_id=None)` | Wait for the next matching message or callback query. `chat_id`/`user_id` accept an ID, `@username`, or list of them. `timeout` defaults to `client.listener_timeout` (`60`s); `timeout=None` waits forever. |
-| `await client.ask(chat_id, text, filters=None, timeout=..., user_id=None, listener_type=ListenerTypes.MESSAGE, unallowed_click_alert=True, message_id=None, inline_message_id=None, **send_kwargs)` | Send `text` (to `chat_id[0]` if a list), then wait. The sent message is `response.request` / `response.sent_message`. |
-| `client.cancel_listener(chat_id=None, user_id=None)` | Cancel pending listeners (all if no arguments). Returns the count. Alias: `stop_listening`. |
-| `await message.chat.ask(text, ...)` / `await message.chat.listen(...)` | Shortcuts bound to that chat (also `chat.cancel_listener()`). |
-| `await message.from_user.ask(text, ...)` / `await message.from_user.listen(...)` | Shortcuts bound to that user (also `user.cancel_listener()`). |
+| `await client.listen(chat_id=None, filters=None, timeout=..., user_id=None, listener_type="message", unallowed_click_alert=True, message_id=None, inline_message_id=None)` | Wait for the next matching message or callback query. `chat_id` and `user_id` accept an ID, `@username`, or a list of them. `timeout` defaults to `client.listener_timeout` (`60`s); `timeout=None` waits forever. |
+| `await client.ask(chat_id, text, filters=None, timeout=..., user_id=None, listener_type="message", unallowed_click_alert=True, message_id=None, inline_message_id=None, **send_kwargs)` | Send `text` (to `chat_id[0]` if a list), then wait. The sent message is attached as `response.request` and `response.sent_message`. A blank `text` skips sending. |
+| `client.cancel_listener(chat_id=None, user_id=None)` | Cancel pending listeners (all if no arguments). Returns the number cancelled. Alias: `stop_listening`. |
+| `await message.chat.ask(text, ...)` / `await message.chat.listen(...)` | Chat-bound shortcuts (also `chat.cancel_listener()` / `chat.stop_listening()`). |
+| `await message.from_user.ask(text, ...)` / `await message.from_user.listen(...)` | User-bound shortcuts (also `user.cancel_listener()` / `user.stop_listening()`). |
 
-After `import pyrolisten.listen` the exceptions can be imported from `pyrogram`
-(`from pyrogram import ListenerTimeout, ListenerCanceled`), `pyrogram.errors`
-(`from pyrogram.errors import ListenerTimeout`), or directly from `pyrolisten`. This needs
-`pyrolisten.listen` to be imported **first**; editors and type checkers won't know about
-patched names on `pyrogram`, so `from pyrolisten import ...` is the safer choice for typed projects.
+## Exceptions
 
-Exceptions: `ListenerTimeout` (also an `asyncio.TimeoutError`) and `ListenerCanceled`
-(aliases: `ListenerCancelled`, `ListenerStopped`).
+After `import pyrolisten.listen`, import exceptions from `pyrogram.errors` or directly from `pyrolisten` (recommended for type checkers):
 
-## Author
+- `ListenerTimeout` (subclasses `asyncio.TimeoutError`)
+- `ListenerCanceled` (aliases: `ListenerCancelled`, `ListenerStopped`)
 
-[Maharam Ali Khan](https://github.com/ps-updates)
+## Credits
 
-Based on the idea of [Kurikit](https://github.com/TechifyBots/Kurikit); the `listen`/`ask` API
-is inspired by pyromod. No pyromod code is used.
+Created by [Maharam Ali Khan](https://github.com/ps-updates).
+
+Inspired by [Kurikit](https://github.com/TechifyBots/Kurikit) and the `pyromod` API. Written from scratch with original code.
 
 ## License
 
-MIT (see `LICENSE`)
+[MIT](LICENSE)
